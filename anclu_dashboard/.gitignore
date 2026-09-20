@@ -1,0 +1,20 @@
+# Secretos: nunca subir db_url a GitHub
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Snapshots antiguos del pbix (la app usa fuentes vivas/Supabase; solo se sube el Calendario)
+data_anclu/*.parquet
+!data_anclu/Calendario.parquet
+
+# CSV de carga a Supabase (la nube lee de la base de datos)
+ventas_anclu_supabase.csv
+
+# Streamlit / IDE
+.streamlit/logs/
+.vscode/
+.idea/

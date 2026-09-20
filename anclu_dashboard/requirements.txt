@@ -1,0 +1,7 @@
+pandas>=2.2
+pyarrow
+plotly
+openpyxl
+sqlalchemy
+psycopg2-binary
+streamlit>=1.40
