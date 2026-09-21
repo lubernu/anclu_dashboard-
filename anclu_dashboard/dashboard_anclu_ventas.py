@@ -86,7 +86,9 @@ def _leer_supabase(url, tabla):
 def _leer_opcional(supa, tabla, fallback):
     if supa:
         try:
-            return _leer_supabase(supa, tabla)
+            df = _leer_supabase(supa, tabla)
+            if df is not None and not df.empty:
+                return df
         except Exception:
             pass
     return fallback()
@@ -195,8 +197,11 @@ def load_data(_sig_):
         elif "laboral" in ckey or "días_lab" in ckey or "dias_lab" in ckey:
             ren.setdefault("Día Laboral", c)
     cal = cal.rename(columns=ren)
-    if "Día Laboral" not in cal.columns:
-        cal["Día Laboral"] = 1
+    if "Date" not in cal.columns or "Día Laboral" not in cal.columns:
+        try:
+            cal = pd.read_parquet(os.path.join(DATA_DIR, "Calendario.parquet"))
+        except Exception:
+            cal = pd.DataFrame(columns=["Date", "Día Laboral"])
     cal["Date"] = pd.to_datetime(cal["Date"])
     cal["anio"] = cal["Date"].dt.year
     cal["mes_num"] = cal["Date"].dt.month
@@ -248,6 +253,9 @@ st.markdown(
         padding-left:10px; border-left:4px solid var(--brand); line-height:1.25;
     }
     .sec-title small { font-weight:600; color:var(--muted); font-size:.78rem; }
+    .seg-header { font-weight:800; font-size:.82rem; letter-spacing:.08em; text-transform:uppercase;
+        color:var(--brand); border-bottom:2px solid var(--grid); padding-bottom:6px;
+        margin:2px 0 10px; }
 
     /* Tarjetas KPI */
     .kpi-card {
@@ -366,14 +374,9 @@ with st.sidebar:
         index=list(MESES.keys()).index(mes_default),
         key="filtro_mes",
     )
-    productos = sorted(fact["Producto"].dropna().unique().tolist())
-    prod_opc = st.selectbox("Tipo de producto", [OPCION_TODOS] + productos,
-                            index=0, key="filtro_producto")
-    sel_productos = productos if prod_opc == OPCION_TODOS else [prod_opc]
-    pdvs = sorted(fact["centro_costo"].dropna().unique().tolist())
-    pdv_opc = st.selectbox("Oficina / PDV", [OPCION_TODOS] + pdvs,
-                           index=0, key="filtro_pdv")
-    sel_pdvs = pdvs if pdv_opc == OPCION_TODOS else [pdv_opc]
+
+pdvs = sorted(fact["centro_costo"].dropna().unique().tolist())
+sel_pdvs = pdvs
 
 # ---------------------------------------------------------------------------
 # Helpers de visualizacion
@@ -442,8 +445,6 @@ def tabla(df, **kw):
 def filtra_ventas():
     m = fact["anio"] == sel_anio
     m &= fact["mes_num"] == sel_mes
-    m &= fact["Producto"].isin(sel_productos)
-    m &= fact["centro_costo"].isin(sel_pdvs)
     return fact[m].copy()
 
 
@@ -452,11 +453,12 @@ def conteos_por(grupo, f):
 
 
 def _base_ventas():
-    return fact[(fact["Producto"].isin(sel_productos)) & (fact["centro_costo"].isin(sel_pdvs))]
+    return fact
 
 
-def comparativos_por(grupo):
-    base = _base_ventas()
+def comparativos_por(grupo, base=None):
+    if base is None:
+        base = _base_ventas()
     pv_anio, pv_mes = (sel_anio - 1, 12) if sel_mes == 1 else (sel_anio, sel_mes - 1)
     ay_anio = sel_anio - 1
 
@@ -535,96 +537,130 @@ with tab_inicio:
 
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
 
-        c1, c2 = st.columns([1, 1.35], gap="medium")
-        with c1:
-            sec_title("Proyección vs. real", nota=periodo)
-            pct = (cant / proy * 100) if proy else 0
-            gauge = go.Figure(go.Indicator(
-                mode="number", value=cant,
-                number={"font": {"size": 46, "color": INK}},
-                domain={"x": [0, 1], "y": [0.1, 1]},
-                gauge={
-                    "axis": {"range": [0, max(cant * 1.08, proy * 1.08)], "tickformat": ",.0f"},
-                    "bar": {"color": BRAND},
-                    "bgcolor": GRID,
-                    "borderwidth": 0,
-                    "steps": [{"range": [0, cant], "color": "#FDECEE"}],
-                    "threshold": {"line": {"color": GOLD, "width": 4},
-                                  "thickness": 0.9, "value": proy},
-                },
-            ))
-            estilizar(gauge, h=250)
-            gauge.add_annotation(
-                x=0.5, y=0.02, showarrow=False,
-                text=f"Meta del mes (línea dorada): <b>{FMT_NUM(proy)}</b> · cumplimiento "
-                     f"<b>{FMT_PCT(pct)}</b>",
-                xref="paper", yref="paper", font=dict(size=13, color=MUTED),
-            )
-            st.plotly_chart(gauge, width="stretch")
+        fe = f[f["Producto"] == "Equipos"]
+        fp = f[f["Producto"] == "Postpago"]
 
-            sec_title("Ventas por tipo de producto")
-            tp = conteos_por("TipoProducto", f).sort_values("Cant. Ventas", ascending=False)
-            fig = px.bar(tp, x="TipoProducto", y="Cant. Ventas", text="Cant. Ventas",
-                         color_discrete_sequence=[BRAND])
-            fig.update_traces(textposition="outside", textfont_size=12,
-                             texttemplate="%{y:,.0f}")
-            estilizar(fig, h=290)
-            corneado(fig)
-            st.plotly_chart(fig, width="stretch")
+        def _cab(titulo, nota=""):
+            sec_title(titulo, nota=nota)
+            l, r = st.columns(2, gap="medium")
+            with l:
+                st.markdown('<div class="seg-header">Equipos</div>', unsafe_allow_html=True)
+            with r:
+                st.markdown('<div class="seg-header">Postpago</div>', unsafe_allow_html=True)
+            return l, r
 
-        with c2:
-            sec_title("Ventas por oficina · vs. mes y año anterior")
-            comp = comparativos_por("centro_costo")
-            figb = go.Figure()
-            figb.add_bar(x=comp["centro_costo"], y=comp["Cant. Ventas"],
-                         name="Actual", marker_color=BRAND)
-            figb.add_bar(x=comp["centro_costo"], y=comp["Mes Anterior"],
-                         name="Mes Anterior", marker_color="#CBD5E1")
-            figb.add_bar(x=comp["centro_costo"], y=comp["Año Anterior"],
-                         name="Año Anterior", marker_color="#93C5FD")
-            figb.update_layout(barmode="group")
-            estilizar(figb, h=380)
-            corneado(figb, r=4)
-            figb.update_xaxes(tickangle=-30)
-            st.plotly_chart(figb, width="stretch")
+        # 1. Proyeccion vs. real
+        l, r = _cab("Proyección vs. real", nota=periodo)
+        for col, dfs in ((l, fe), (r, fp)):
+            with col:
+                seg_cant = len(dfs)
+                seg_proy = proyeccion(dfs)
+                pct = (seg_cant / seg_proy * 100) if seg_proy else 0
+                rng = max(seg_cant * 1.08, seg_proy * 1.08, 1)
+                gauge = go.Figure(go.Indicator(
+                    mode="number", value=seg_cant,
+                    number={"font": {"size": 44, "color": INK}},
+                    domain={"x": [0, 1], "y": [0.1, 1]},
+                    gauge={
+                        "axis": {"range": [0, rng], "tickformat": ",.0f"},
+                        "bar": {"color": BRAND},
+                        "bgcolor": GRID,
+                        "borderwidth": 0,
+                        "steps": [{"range": [0, seg_cant], "color": "#FDECEE"}],
+                        "threshold": {"line": {"color": GOLD, "width": 4},
+                                      "thickness": 0.9, "value": seg_proy},
+                    },
+                ))
+                estilizar(gauge, h=250)
+                gauge.add_annotation(
+                    x=0.5, y=0.02, showarrow=False,
+                    text=f"Meta del mes (línea dorada): <b>{FMT_NUM(seg_proy)}</b> · cumplimiento "
+                         f"<b>{FMT_PCT(pct)}</b>",
+                    xref="paper", yref="paper", font=dict(size=13, color=MUTED),
+                )
+                st.plotly_chart(gauge, width="stretch")
 
-            sec_title("Ventas diarias del mes")
-            diaria = f.groupby("dia", as_index=False).size().rename(columns={"size": "Ventas"})
-            figl = px.line(diaria, x="dia", y="Ventas", markers=True, color_discrete_sequence=[BRAND])
-            figl.update_traces(line_width=3, marker_size=7, fill="tozeroy",
-                               fillcolor="rgba(229,33,43,0.08)")
-            figl.update_layout(xaxis_title="", yaxis_title="Ventas", xaxis=dict(dtick=1))
-            estilizar(figl, h=260)
-            st.plotly_chart(figl, width="stretch")
+        # 2. Ventas por oficina · vs. mes y año anterior
+        l, r = _cab("Ventas por oficina · vs. mes y año anterior")
+        for col, seg in ((l, "Equipos"), (r, "Postpago")):
+            with col:
+                comp = comparativos_por("centro_costo", fact[fact["Producto"] == seg])
+                figb = go.Figure()
+                figb.add_bar(x=comp["centro_costo"], y=comp["Cant. Ventas"],
+                             name="Actual", marker_color=BRAND)
+                figb.add_bar(x=comp["centro_costo"], y=comp["Mes Anterior"],
+                             name="Mes Anterior", marker_color="#CBD5E1")
+                figb.add_bar(x=comp["centro_costo"], y=comp["Año Anterior"],
+                             name="Año Anterior", marker_color="#93C5FD")
+                figb.update_layout(barmode="group")
+                estilizar(figb, h=320)
+                corneado(figb, r=4)
+                figb.update_xaxes(tickangle=-30)
+                st.plotly_chart(figb, width="stretch")
 
-        c3, c4 = st.columns(2, gap="medium")
-        with c3:
-            sec_title("Top vendedores", nota=periodo)
-            vend = f.groupby("vendedor", as_index=False).size().rename(columns={"size": "Cant. Ventas"})
-            vend = vend.sort_values("Cant. Ventas", ascending=False).head(15)
-            disp_v = pd.DataFrame({
-                "Vendedor": vend["vendedor"],
-                "Ventas": [FMT_NUM(v) for v in vend["Cant. Ventas"]],
-            })
-            tabla(disp_v, height=360)
-        with c4:
-            sec_title("Ventas por marca · vs. año anterior")
-            mar = f.groupby("Marca", as_index=False).size().rename(columns={"size": "Cant. Ventas"})
-            mar_ant = _base_ventas()
-            mar_ant = mar_ant[(mar_ant["anio"] == sel_anio - 1) & (mar_ant["mes_num"] == sel_mes)]
-            mar_ant = mar_ant.groupby("Marca", as_index=False).size().rename(columns={"size": "Año Anterior"})
-            mar = mar.merge(mar_ant, on="Marca", how="outer").fillna(0)
-            mar["Cant. Ventas"] = mar["Cant. Ventas"].astype(int)
-            mar["Año Anterior"] = mar["Año Anterior"].astype(int)
-            mar = mar.sort_values("Cant. Ventas", ascending=False).head(12)
-            g = go.Figure()
-            g.add_bar(x=mar["Marca"], y=mar["Cant. Ventas"], name="Actual", marker_color=BRAND)
-            g.add_bar(x=mar["Marca"], y=mar["Año Anterior"], name="Año Anterior", marker_color="#93C5FD")
-            g.update_layout(barmode="group")
-            estilizar(g, h=360)
-            corneado(g, r=4)
-            g.update_xaxes(tickangle=-30)
-            st.plotly_chart(g, width="stretch")
+        # 3. Ventas por tipo de producto
+        l, r = _cab("Ventas por tipo de producto")
+        for col, dfs in ((l, fe), (r, fp)):
+            with col:
+                tp = conteos_por("TipoProducto", dfs).sort_values("Cant. Ventas", ascending=False)
+                fig = px.bar(tp, x="TipoProducto", y="Cant. Ventas", text="Cant. Ventas",
+                             color_discrete_sequence=[BRAND])
+                fig.update_traces(textposition="outside", textfont_size=12,
+                                  texttemplate="%{y:,.0f}")
+                estilizar(fig, h=300)
+                corneado(fig)
+                st.plotly_chart(fig, width="stretch")
+
+        # 4. Ventas diarias del mes
+        l, r = _cab("Ventas diarias del mes")
+        for col, dfs in ((l, fe), (r, fp)):
+            with col:
+                diaria = dfs.groupby("dia", as_index=False).size().rename(columns={"size": "Ventas"})
+                figl = px.line(diaria, x="dia", y="Ventas", markers=True,
+                               color_discrete_sequence=[BRAND])
+                figl.update_traces(line_width=3, marker_size=7, fill="tozeroy",
+                                   fillcolor="rgba(229,33,43,0.08)")
+                figl.update_layout(xaxis_title="", yaxis_title="Ventas", xaxis=dict(dtick=1))
+                estilizar(figl, h=250)
+                st.plotly_chart(figl, width="stretch")
+
+        # 5. Top vendedores
+        l, r = _cab("Top vendedores", nota=periodo)
+        for col, dfs in ((l, fe), (r, fp)):
+            with col:
+                vend = dfs.groupby("vendedor", as_index=False).size().rename(
+                    columns={"size": "Cant. Ventas"})
+                vend = vend.sort_values("Cant. Ventas", ascending=False).head(10)
+                disp_v = pd.DataFrame({
+                    "Vendedor": vend["vendedor"],
+                    "Ventas": [FMT_NUM(v) for v in vend["Cant. Ventas"]],
+                })
+                tabla(disp_v, height=320)
+
+        # 6. Ventas por marca · vs. año anterior
+        l, r = _cab("Ventas por marca · vs. año anterior")
+        for col, seg in ((l, "Equipos"), (r, "Postpago")):
+            with col:
+                dfs = fe if seg == "Equipos" else fp
+                mar = dfs.groupby("Marca", as_index=False).size().rename(
+                    columns={"size": "Cant. Ventas"})
+                mar_ant = fact[fact["Producto"] == seg]
+                mar_ant = mar_ant[(mar_ant["anio"] == sel_anio - 1) & (mar_ant["mes_num"] == sel_mes)]
+                mar_ant = mar_ant.groupby("Marca", as_index=False).size().rename(
+                    columns={"size": "Año Anterior"})
+                mar = mar.merge(mar_ant, on="Marca", how="outer").fillna(0)
+                mar["Cant. Ventas"] = mar["Cant. Ventas"].astype(int)
+                mar["Año Anterior"] = mar["Año Anterior"].astype(int)
+                mar = mar.sort_values("Cant. Ventas", ascending=False).head(10)
+                g = go.Figure()
+                g.add_bar(x=mar["Marca"], y=mar["Cant. Ventas"], name="Actual", marker_color=BRAND)
+                g.add_bar(x=mar["Marca"], y=mar["Año Anterior"], name="Año Anterior",
+                          marker_color="#93C5FD")
+                g.update_layout(barmode="group")
+                estilizar(g, h=320)
+                corneado(g, r=4)
+                g.update_xaxes(tickangle=-30)
+                st.plotly_chart(g, width="stretch")
 
 # =============================== CLARO =======================================
 with tab_claro:
@@ -636,17 +672,9 @@ with tab_claro:
             "se muestran al tener esta tabla y `metas_claro`."
         )
         st.stop()
-    c_anio, c_mes, c_meta = st.columns(3)
-    with c_anio:
-        anio_rp_sel = st.selectbox("Año (actividades)", anios_rp,
-                                   index=anios_rp.index(anio_rp_default), key="claro_anio")
-        mes_rp_opts = sorted(rp.loc[rp["anio"] == anio_rp_sel, "mes_num"].unique().tolist())
-    with c_mes:
-        mes_rp_sel = st.selectbox("Mes (actividades)", mes_rp_opts,
-                                  format_func=lambda m: MESES[m].capitalize(),
-                                  index=len(mes_rp_opts) - 1 if mes_rp_opts else 0, key="claro_mes")
-    with c_meta:
-        sel_meta = st.selectbox("Categoría de meta", OPCIONES_META, index=0, key="claro_meta")
+    anio_rp_sel = anio_rp_default
+    mes_rp_sel = mes_rp_default
+    sel_meta = OPCIONES_META[0]
     frp = rp[(rp["anio"] == anio_rp_sel) & (rp["mes_num"] == mes_rp_sel)].copy()
     fmet = metas[(metas["anio"] == anio_rp_sel) & (metas["mes_num"] == mes_rp_sel)].copy()
     fmet = fmet[fmet["META_DE"] == sel_meta]
