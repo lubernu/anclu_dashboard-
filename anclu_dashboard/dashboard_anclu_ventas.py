@@ -323,12 +323,12 @@ st.markdown(
 # Filtros globales
 # ---------------------------------------------------------------------------
 anios_venta = sorted(fact["anio"].dropna().unique().tolist())
-anio_default = anios_venta[-1]
+anio_default = anios_venta[-1] if anios_venta else 2026
 meses_disponibles_anio = sorted(fact.loc[fact["anio"] == anio_default, "mes_num"].unique().tolist())
 mes_default = meses_disponibles_anio[-1] if meses_disponibles_anio else 1
 
 anios_rp = sorted(rp["anio"].dropna().unique().tolist())
-anio_rp_default = anios_rp[-1]
+anio_rp_default = anios_rp[-1] if anios_rp else anio_default
 meses_rp = sorted(rp.loc[rp["anio"] == anio_rp_default, "mes_num"].unique().tolist())
 mes_rp_default = meses_rp[-1] if meses_rp else 1
 
@@ -626,6 +626,14 @@ with tab_inicio:
 
 # =============================== CLARO =======================================
 with tab_claro:
+    if not anios_rp:
+        st.info(
+            "Aún no hay actividades Rp cargadas. Cuando subas la tabla "
+            "`ventas_anclu_rp` en Supabase (ver `supabase_tablas.sql`) "
+            "aparecerán los datos aquí. Las metas y el corte de activaciones "
+            "se muestran al tener esta tabla y `metas_claro`."
+        )
+        st.stop()
     c_anio, c_mes, c_meta = st.columns(3)
     with c_anio:
         anio_rp_sel = st.selectbox("Año (actividades)", anios_rp,
