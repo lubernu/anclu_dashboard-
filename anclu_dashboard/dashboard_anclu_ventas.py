@@ -187,6 +187,16 @@ def load_data(_sig_):
 
     cal = _leer_opcional(supa, "calendario",
                          lambda: pd.read_parquet(os.path.join(DATA_DIR, "Calendario.parquet")))
+    ren = {}
+    for c in cal.columns:
+        ckey = c.strip().lower().replace(" ", "_")
+        if "date" in ckey or "fecha" in ckey:
+            ren.setdefault("Date", c)
+        elif "laboral" in ckey or "días_lab" in ckey or "dias_lab" in ckey:
+            ren.setdefault("Día Laboral", c)
+    cal = cal.rename(columns=ren)
+    if "Día Laboral" not in cal.columns:
+        cal["Día Laboral"] = 1
     cal["Date"] = pd.to_datetime(cal["Date"])
     cal["anio"] = cal["Date"].dt.year
     cal["mes_num"] = cal["Date"].dt.month
