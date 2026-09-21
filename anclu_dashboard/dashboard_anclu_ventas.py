@@ -112,9 +112,21 @@ def load_data(_sig_):
     if supa:
         try:
             fact = _leer_supabase(supa, "ventas_anclu")
-        except Exception:
-            fact = pd.read_csv(SIG_VENTAS, sep=",", encoding="utf-8-sig", low_memory=False)
+        except Exception as _exc:
+            if os.path.exists(SIG_VENTAS):
+                fact = pd.read_csv(SIG_VENTAS, sep=",", encoding="utf-8-sig", low_memory=False)
+            else:
+                raise RuntimeError(
+                    "No se pudo leer 'ventas_anclu' desde Supabase. "
+                    "Revisa el secret [supabase] db_url (formato postgresql://...). "
+                    f"Detalle: {type(_exc).__name__}"
+                ) from _exc
     else:
+        if not os.path.exists(SIG_VENTAS):
+            raise RuntimeError(
+                "Falta el secret [supabase] db_url en Streamlit Cloud "
+                "(Settings → Secrets) para poder leer los datos."
+            )
         fact = pd.read_csv(SIG_VENTAS, sep=",", encoding="utf-8-sig", low_memory=False)
     fact["fec_registro"] = pd.to_datetime(fact["fec_registro"], errors="coerce")
     for c in ["valor_plan_", "iva_plan_", "valor_telefono_", "iva_telefono_",
