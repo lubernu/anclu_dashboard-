@@ -354,8 +354,7 @@ def _indice_opcion(lista, sel):
 
 with st.sidebar:
     st.markdown(
-        f'<div class="sidebar-logo"><img src="data:image/png;base64,{LOGO_B64}">'
-        '<span style="font-weight:800;color:#1C1E29;">Anclu</span></div>',
+        f'<div class="sidebar-logo"><img src="data:image/png;base64,{LOGO_B64}"></div>',
         unsafe_allow_html=True,
     )
     st.markdown("### Filtros de ventas")
@@ -375,12 +374,6 @@ with st.sidebar:
     pdv_opc = st.selectbox("Oficina / PDV", [OPCION_TODOS] + pdvs,
                            index=0, key="filtro_pdv")
     sel_pdvs = pdvs if pdv_opc == OPCION_TODOS else [pdv_opc]
-
-    if st.button("Restablecer filtros", width="stretch", key="btn_reset"):
-        for _k in ("filtro_anio", "filtro_mes", "filtro_producto", "filtro_pdv",
-                   "claro_anio", "claro_mes", "claro_meta", "pdv_oficinas"):
-            st.session_state.pop(_k, None)
-        st.rerun()
 
 # ---------------------------------------------------------------------------
 # Helpers de visualizacion
@@ -538,7 +531,6 @@ with tab_inicio:
             ("#2563EB", "Mes anterior", FMT_NUM(pm), f"{FMT_NUM(abs(var_m))} respecto al actual"),
             (VERDE, "Año anterior", FMT_NUM(pa), f"{FMT_NUM(abs(var_a))} respecto al actual"),
             ("#8B5CF6", "Proyección del mes", FMT_NUM(proy), "Sobre días laborales"),
-            (INK, "Corte", str(f["fec_registro"].max().date()), "Último registro cargado"),
         ])
 
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
